@@ -1,7 +1,8 @@
 ---
-title: "Lab 1: R Basics"
+title: 'Lab 1: R Basics'
 author: "Statistical Computing, 36-350"
 date: "Week of Monday August 26, 2019"
+output: pdf_document
 ---
 
 ```{r, include=FALSE}
