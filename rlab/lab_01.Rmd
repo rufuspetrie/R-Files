@@ -1,7 +1,5 @@
 ---
 title: 'Lab 1: R Basics'
-author: "Statistical Computing, 36-350"
-date: "Week of Monday August 26, 2019"
 output: pdf_document
 ---
 
@@ -10,10 +8,7 @@ knitr::opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=TRUE)
 ```
 
 Name: Rufus Petrie    
-Andrew ID:  
-Collaborated with:  
 
-This lab is to be done in class (completed outside of class if need be). You can collaborate with your classmates, but you must identify their names above, and you must submit **your own** lab as an knitted HTML file on Canvas, by Sunday 11:59pm, this week. Make sure to complete your weekly **check-in** (which can be done by coming to lecture, recitation, lab, or any office hour), as this will count a small number of points towards your lab score.
 
 ```{r}
 ## For reproducibility --- don't change this!
