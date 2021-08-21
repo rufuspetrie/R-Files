@@ -1,0 +1,272 @@
+---
+title: 'Lab 9: Fitting Models to Data'
+output: pdf_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=TRUE)
+```
+
+Name: Rufus Petrie    
+
+**This week's agenda**: exploratory data analysis, cleaning data, fitting linear/logistic models, and using associated utility functions.
+
+Prostate cancer data
+===
+
+Recall the data set on 97 men who have prostate cancer (from the book [The Elements of Statistical Learning](http://statweb.stanford.edu/~tibs/ElemStatLearn/)). Reading it into our R session:
+
+```{r}
+pros.df = 
+  read.table("http://www.stat.cmu.edu/~ryantibs/statcomp/data/pros.dat")
+dim(pros.df)
+head(pros.df, 3)
+```
+
+Simple exploration and linear modeling
+===
+
+- **1a.** Define `pros.df.subset` to be the subset of observations (rows) of the prostate data set such the `lcp` measurement is greater than the minimum value (the minimum value happens to be `log(0.25)`, but you should not hardcode this value and should work it out from the data). As in lecture, plot histograms of all of the variables in `pros.df.subset`. Comment on any differences you see between these distributions and the ones in lecture.
+
+```{r}
+pros.df.subset <- pros.df[pros.df$lcp > min(pros.df$lcp),]
+par(mfrow=c(3,3), mar=c(4,4,2,0.5))
+for (j in 1:ncol(pros.df.subset)) {
+  hist(pros.df.subset[,j], xlab=colnames(pros.df.subset)[j],
+       main=paste("Histogram of", colnames(pros.df.subset)[j]),
+       col="lightblue", breaks=20)
+}
+```
+
+Most of the histograms look the same except for lcp, pgg45, and lpsa. lcp and pgg45 no longer have large bars are zero because we removed the observations with the minimum lcp score. Additionally, lpsa looks closer to a uniform distribution than a bell curve now.
+
+- **1b.** Also as in lecture, compute and display correlations between all pairs of variables in `pros.df.subset`. Report the two highest correlations between pairs of (distinct) variables, and also report the names of the associated variables. Are these different from answers that were computed on the full data set?
+
+```{r}
+pros.cor = cor(pros.df.subset)
+round(pros.cor,3)
+
+# Note: set cor lower triangle/diagonal to zero so we can ignore autocorrelations
+pros.cor[lower.tri(pros.cor,diag=TRUE)] = 0
+pros.cor.sorted = sort(abs(pros.cor),decreasing=T)
+
+# Top 2 correlations
+pros.cor.sorted[1:2]
+
+# Top correlation
+vars.big.cor = arrayInd(which(abs(pros.cor)==pros.cor.sorted[1]), 
+                        dim(pros.cor))
+colnames(pros.df)[vars.big.cor]
+
+# 2ns highest correlation
+vars.big.cor = arrayInd(which(abs(pros.cor)==pros.cor.sorted[2]), 
+                        dim(pros.cor))
+colnames(pros.df)[vars.big.cor] 
+```
+
+Gleason and pgg45 no longer have the highest correlation. The lcavol/lpsa correlation is now highest, and svi/lcp is now the second highest.
+
+- **1c.** Compute, using `lm()`, a linear regression model of `lpsa` (log PSA score) on `lcavol` (log cancer volume). Do this twice: once with the full data set, `pros.df`, and once with the subsetted data, `pros.df.subset`. Save the results as `pros.lm.` and `pros.subset.lm`, respectively. Using `coef()`, display the coefficients (intercept and slope) from each linear regression. Are they different?
+
+```{r}
+pros.lm <- lm(lpsa ~ lcavol, data = pros.df)
+pros.subset.lm <- lm(lpsa ~ lcavol, data = pros.df.subset)
+coef(pros.lm)
+coef(pros.subset.lm)
+```
+
+lcavol has a lower coefficient in the second model. 
+
+- **1d.** Let's produce a visualization to help us figure out how different these regression lines really are. Plot `lpsa` versus `lcavol`, using the full set of observations, in `pros.df`. Label the axes appropriately. Then, mark the observations in `pros.df.subset` by small filled red circles. Add a thick black line to your plot, displaying the fitted regression line from `pros.lm`. Add a thick red line, displaying the fitted regression line from `pros.subset.lm`. Add a legend that explains the color coding. 
+
+```{r}
+plot(pros.df$lcavol, pros.df$lpsa,
+       main="lpsa vs. lcavol", xlab="lcavol", ylab="lpsa")
+points(pros.df.subset$lcavol, pros.df.subset$lpsa, col="red", pch=19)
+abline(a =1.5072975, b =,0.7193204, lty=1)
+abline(a =1.6695707, b =,0.6725807, lty=1, col="red")
+legend("bottomright", legend=c("lcp=min", "lcp>min"), col=c("black", "red"), pch=c(21, 19))
+```
+
+- **1e.** Compute again a linear regression of `lpsa` on `lcavol`, but now on two different subsets of the data: the first consisting of patients with SVI, and the second consistent of patients without SVI. Display the resulting coefficients (intercept and slope) from each model, and produce a plot just like the one in the last question, to visualize the different regression lines on top of the data. Do these two regression lines differ, and in what way?
+
+```{r}
+
+svi.lm <- lm(lpsa ~ lcavol, data = pros.df[pros.df$svi==1,])
+nosvi.lm <- lm(lpsa ~ lcavol, data = pros.df[pros.df$svi==0,])
+coef(svi.lm)
+coef(nosvi.lm)
+plot(pros.df$lcavol, pros.df$lpsa,
+       main="lpsa vs. lcavol", xlab="lcavol", ylab="lpsa")
+points(pros.df[pros.df$svi==0,]$lcavol, pros.df[pros.df$svi==0,]$lpsa, col="red", pch=19)
+abline(a =2.053552, b =0.651189, lty=1)
+abline(a =1.539704, b =0.586396, lty=1, col="red")
+legend("bottomright", legend=c("svi == 1", "svi == 0"), col=c("black", "red"), pch=c(21, 19))
+```
+
+From the regression lines, it appears that patients with svi tend to have a higher lpsa on average. The svi patients both have a larger intercept and slope, and this difference appears larger than the one for the different groups split up by lcp. We should expect this because for the first set of regressions, we ran a regression on the whole data and then a subset, but for these regressions, we ran regressions on each of the subsets.
+
+Reading in, exploring wage data
+===
+
+- **2a.** A data table of dimension 3000 x 11, containing demographic and economic variables measured on individuals living in the mid-Atlantic region, is up at http://www.stat.cmu.edu/~ryantibs/statcomp/data/wage.csv. (This has been adapted from the book [An Introduction to Statistical Learning](http://www-bcf.usc.edu/~gareth/ISL/).) Load this data table into your R session with `read.csv()` and save the resulting data frame as `wage.df`. Check that `wage.df` has the right dimensions, and display its first 3 rows. Hint: the first several lines of the linked file just explain the nature of the data; open up the file (either directly in your web browser or after you download it to your computer), and count how many lines must be skipped before getting to the data; then use an appropriate setting for the `skip` argument to `read.csv()`.
+
+```{r}
+wage.df <- read.csv("http://www.stat.cmu.edu/~ryantibs/statcomp/data/wage.csv",
+                    skip=16, stringsAsFactors = TRUE)
+head(wage.df)
+```
+
+- **2b.** Identify all of the factor variables in `wage.df`, set up a plotting grid of appropriate dimensions, and then plot each of these factor variables, with appropriate titles. What do you notice about the distributions?
+
+```{r}
+vars <- colnames(wage.df)[-c(1,2,11)]
+par(mfrow=c(4,2), mar=c(2,2,2,2))
+for (j in 1:length(vars)) {
+  plot(wage.df[,vars[j]],
+       main= vars[j],
+       col="lightblue")
+}
+```
+
+The sample appears to be entirely men from the mid-Atlantic region.
+
+- **2c.** Identify all of the numeric variables in `wage.df`, set up a plotting grid of appropriate dimensions, and then plot histograms of each these numeric variables, with appropriate titles and x-axis labels. What do you notice about the distributions? In particular, what do you notice about the distribution of the `wage` column? Does it appear to be unimodal (having a single mode)? Does what you see make sense?
+
+```{r}
+vars <- c("year", "age", "wage")
+breaks <- c(5, 50, 50)
+par(mfrow=c(3,1), mar=c(2,2,2,2))
+for (j in 1:length(vars)) {
+  hist(wage.df[,vars[j]],
+       main= vars[j],
+       col="lightblue",
+       breaks=breaks[j])
+}
+```
+
+Obviously it will depend on how many breaks you use for the histograms, but wage appears to be unimodal.
+
+Wage linear regression modeling
+===
+
+- **3a.** Fit a linear regression model, using `lm()`, with response variable `wage` and predictor variables `year` and `age`, using the `wage.df` data frame. Call the result `wage.lm`. Display the coefficient estimates, using `coef()`, for `year` and `age`. Do they have the signs you would expect, i.e., can you explain their signs? Display a summary, using `summary()`, of this linear model. Report the standard errors and p-values associated with the coefficient estimates for `year` and `age`. Do both of these predictors appear to be significant, based on their p-values?
+
+```{r}
+wage.lm <- lm(wage ~ year + age, data=wage.df)
+coef(wage.lm)
+summary(wage.lm)
+```
+
+Both age and wage have positive signs, which makes sense because age is correlated with experience which correlates with wage, and year is correlated with inflation which is also correlated with wage. Both of these predictors have low p-values, so I would conclude that they're statistically significant.
+
+- **3b.** Save the standard errors of `year` and `age` into a vector called `wage.se`, and print it out to the console. Don't just type the values in you see from `summary()`; you need to determine these values programmatically. Hint: define `wage.sum` to be the result of calling `summary()` on `wage.lm`; then figure out what kind of R object `wage.sum` is, and how you can extract the standard errors.
+
+```{r}
+wage.sum <- summary(wage.lm)
+wage.sum$coefficients[,"Std. Error"]
+```
+
+- **3c.** Plot diagnostics of the linear model fit in the previous question, using `plot()` on `wage.lm`. Look at the "Residuals vs Fitted", "Scale-Location", and "Residuals vs Leverage" plots---are there any groups of points away from the main bulk of points along the x-axis? Look at the "Normal Q-Q" plot---do the standardized residuals lie along the line $y=x$? Note: don't worry too if you're generally unsure how to interpret these diagnostic plots; you'll learn a lot more in your Modern Regression 36-401 course; for now, you can just answer the questions we asked. **Challenge**: what is causing the discrepancies you are (should be) seeing in these plots? Hint: look back at the histogram of the `wage` column you plotted above. 
+
+```{r}
+plot(wage.lm)
+```
+
+The standard errors look like they're normally distributed apart from a relatively small number of outliers. This group corresponds to people who have abnormally large wages, and age/year don't necessarily correlate well with those observations.
+
+- **3d.** Refit a linear regression model with response variable `wage` and predictor variables `year` and `age`, but this time only using observations in the `wage.df` data frame for which the `wage` variable is less than or equal to 250 (note, this is measured in thousands of dollars!). Call the result `wage.lm.lt250`. Display a summary, reporting the coefficient estimates of `year` and `age`, their standard errors, and associated p-values. Are these coefficients different than before? Are the predictors `year` and `age` still significant? Finally, plot diagnostics. Do the "Residuals vs Fitted", "Normal Q-Q", "Scale-location", and "Residuals vs Leverage" plots still have the same problems as before?
+
+```{r}
+wage.lm.lt250 <- lm(wage ~ year + age, data = wage.df[wage.df$wage<250,])
+summary(wage.lm.lt250)
+plot(wage.lm.lt250)
+```
+
+The coefficients from age and year are slightly smaller than the ones from before, but they have smaller p-values; this indicates that there's a stronger statistical relationship between wage and these variables in the second model. This likely happened because the large wage outliers from before occurred in later years and among older individuals. This time around, there aren't many points outside of the main groupings in the plots, and the q-q plot is much closer to being linear.
+
+- **3e.** Use your fitted linear model `wage.lm.lt250` to predict: (a) what a 30 year old person should be making this year; (b) what President Trump should be making this year; (c) what you should be making 5 years from now. Comment on the results---which do you think is the most accurate prediction?
+
+```{r}
+wage.new = data.frame(age=c(30, 75, 31), year=c(2021, 2021, 2026))
+wage.pred = predict(wage.lm.lt250, newdata=wage.new)
+wage.pred
+```
+Of the three results, the first prediction is probably the most accurate. The prediction for me includes both my increase in age and the increase in time, so it has two potential sources of error. Donald Trump is an exceptional person, and he probably belongs to the category of people that we excluded when dropping wages over $250, so his prediction probably isn't accurate either. Therefore, the first prediction is probably the best.
+
+Wage logistic regression modeling
+===
+
+- **4a.** Fit a logistic regression model, using `glm()` with `family="binomial"`, with the response variable being the indicator that `wage` is larger than 250, and the predictor variables being `year` and `age`. Call the result `wage.glm`. Note: you can set this up in two different ways: (i) you can manually define a new column (say) `wage.high` in the `wage.df` data frame to be the indicator that the `wage` column is larger than 250; or (ii) you can define an indicator variable "on-the-fly" in the call to `glm()` with an appropriate usage of `I()`. Display a summary, reporting the coefficient estimates for `year` and `age`, their standard errors, and associated p-values. Are the predictors `year` and `age` both significant?
+
+```{r}
+wage.df$wage.high <- wage.df$wage>250
+wage.glm <- glm(wage.high ~ age + year, family="binomial", data=wage.df)
+summary(wage.glm)
+```
+
+Only age is a significant predictor of having high wage in this model.
+
+- **4b.** Refit a logistic regression model with the same response variable as in the last question, but now with predictors `year`, `age`, and `education`. Note that the third predictor is stored as a factor variable, which we call a **categorical variable** (rather than a continuous variable, like the first two predictors) in the context of regression modeling. Display a summary. What do you notice about the predictor `education`: how many coefficients are associated with it in the end? **Challenge**: can you explain why the number of coefficients associated with `education` makes sense?
+
+```{r}
+wage.glm <- glm(wage.high ~ age + year + education, family="binomial", data=wage.df)
+summary(wage.glm)
+```
+
+There are four coefficients associated with education in the regression summary. This is because it's a factor variable with 5 possible values, so the value of having <HS education is coded into the intercept.
+
+- **4c.** In general, one must be careful fitting a logistic regression model on categorial predictors. In order for logistic regression to make sense, for each level of the categorical predictor, we should have observations at this level for which the response is 0, and observations at this level for which the response is 1. In the context of our problem, this means that for each level of the `education` variable, we should have people at this education level that have a wage less than or equal to 250, and also people at this education level that have a wage above 250. Which levels of `education` fail to meet this criterion? Let's call these levels "incomplete", and the other levels "complete".
+
+```{r}
+table(wage.df[wage.df$wage.high==0, "education"])
+table(wage.df[wage.df$wage.high==1, "education"])
+```
+
+Each education level apart from "< HS Grad" has people in both the low and high wage categories.
+
+- **4d.** Refit the logistic regression model as in Q4b, with the same response and predictors, but now throwing out all data in `wage.df` that corresponds to the incomplete education levels (equivalently, using only the data from the complete education levels). Display a summary, and comment on the differences seen to the summary for the logistic regression model fitted in Q4b. Did any predictors become more significant, according to their p-values?
+
+```{r}
+wage.glm <- glm(wage.high ~ age + year + education, family="binomial",
+                data=wage.df[wage.df$education!="1. < HS Grad",])
+summary(wage.glm)
+```
+
+The college graduate and advanced degree coefficients are now significant.
+
+Wage generalized additive modeling (optional)
+===
+
+- **5a.** Install the `gam` package, if you haven't already, and load it into your R session with `library(gam)`. Fit a generalized additive model, using `gam()` with `family="binomial"`, with the response variable being the indicator that `wage` is larger than 250, and the predictor variables being `year`, `age`, and `education`; as in the last question, only use observations in `wage.df` corresponding to the complete education levels. Also, in the call to `gam()`, allow for `age` to have a nonlinear effect by using `s()` (leave `year` and `education` alone, and they will have the default---linear effects). Call the result `wage.gam`. Display a summary with `summary()`. Is the `age` variable more or less significant, in terms of its p-value, to what you saw in the logistic regression model fitted in the last question? Also, plot the fitted effect for each predictor, using `plot()`. Comment on the plots---does the fitted effect make sense to you? In particular, is there a strong nonlinearity associated with the effect of `age`, and does this make sense? 
+
+```{r}
+library(gam)
+wage.gam <- gam(wage.high ~ s(age) + year + education, family = "binomial",
+                data=wage.df[wage.df$education!="1. < HS Grad",])
+summary(wage.gam)
+plot(wage.gam)
+```
+
+The age variable is less significant in this model. We observe fairly linear effects of age and year on the likelihood of wage.high, but age is a downward facing parabola. This makes sense because age will increase experience and therefore wage, but people will eventually start to retire, which will pull the likelihood of having high wage back down. 
+
+- **5b.** Using `wage.gam`, predict the probability that a 30 year old person, who earned a Ph.D., will make over \$250,000 in 2018.
+
+```{r}
+wage.new = data.frame(age=30, year=2018, education="5. Advanced Degree")
+wage.pred = predict(wage.gam, newdata=wage.new)
+exp(wage.pred) / (1+exp(wage.pred))
+```
+
+There's about a 4.7% that a person fitting this description will have high wage in 2018.
+
+- **5c.** For a 32 year old person who earned a Ph.D., how long does he/she have to wait until there is a predicted probability of at least 20\% that he/she makes over \$250,000 in that year? Plot his/her probability of earning at least \$250,000 over the future years---is this strictly increasing?
+
+```{r}
+wage.new = data.frame(age=32:61, year=2020:2049,
+                      education=rep(c("5. Advanced Degree"), times=30))
+wage.pred = predict(wage.gam, newdata=wage.new)
+plot(1:30, exp(wage.pred)/(1+exp(wage.pred)))
+```
+
+This person has to wait about 20 years until his probability of earing a high wage is over 20%. This probability is not strictly increasing and resembles an s-curve.
