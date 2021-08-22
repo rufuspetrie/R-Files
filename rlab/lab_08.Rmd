@@ -128,7 +128,7 @@ head(sprint.w.df, 5)
 ```{r}
 require(data.table)
 cleaner <- function(df){
-  return(setDT(df)[, .SD[which.max(Time)], by=City.Date])
+  return(setDT(df)[, .SD[which.min(Time)], by=City.Date])
 }
 sprint.m.df <- cleaner(sprint.m.df)
 sprint.w.df <- cleaner(sprint.w.df)
@@ -186,4 +186,4 @@ plot(sprint.df.2$Time.w, sprint.df.2$Time.m,
 cor.test(sprint.df.2$Time.w, sprint.df.2$Time.m)
 ```
 
-There doesn't appear to be much of a track effect. There's a fairly large cluster of slower times, and the faster female/male times don't always have a fast counterpart. We see this as the correlation test has a p value of about 0.9, so there doesn't appear to be a statistical correlation between the two samples.
+It appears that there might be a slight track effect. Although the graph doesn't reveal much, the correlation test has very low p-value and indicates the correlation is somewhere around 0.3. Looking at the graph, this correlation seems feasible.
