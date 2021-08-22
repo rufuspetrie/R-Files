@@ -1,0 +1,449 @@
+---
+title: 'Lab 11: Tidyverse II: Tidyr and Advanced Dplyr'
+output: pdf_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=TRUE)
+```
+
+Name: Rufus Petrie    
+
+**This week's agenda**: practicing grouping, pivoting wider and longer, and joins.
+
+```{r message = F, warning = F}
+# Load the tidyverse!
+library(tidyverse)
+assertthat::assert_that(utils::packageVersion("tidyr") > "0.8.99") 
+```
+
+Practice with grouping
+===
+
+Below we read in a data frame `sprint.m.df` containing the top men's times in the 100m sprint, as seen in previous labs. In the following, unless stated otherwise, use pipes and `dplyr` verbs to solve each part as cleanly/succintly as you can.
+
+```{r}
+sprint.m.df = read.table(
+  file="http://www.stat.cmu.edu/~ryantibs/statcomp/data/sprint.m.dat",
+  sep="\t", header=TRUE, quote="", stringsAsFactors=TRUE)
+```
+
+- **1a.** Compute, for each country, the fastest time among athletes who come from that country, and display the first 10 results, ordered alphabetically by country. Also compute, for each city, the fastest time among athletes who ran in that city, and display the first 10 results, ordered alphabetically by city. Hint: `group_by()`, `summarise()`. 
+
+```{r}
+sprint.m.df %>% 
+  group_by(Country) %>% 
+  summarize(Time = min(Time)) %>% 
+  head(10)
+
+sprint.m.df %>% 
+  group_by(City) %>% 
+  summarize(Time = min(Time)) %>% 
+  head(10)
+```
+
+- **1b.** With the most minor modification to your code possible, do the same computations as in the last part, but now display the first 10 results ordered by increasing time. Hint: `arrange()`.
+
+```{r}
+sprint.m.df %>% 
+  group_by(Country) %>% 
+  summarize(Time = min(Time)) %>% 
+  arrange(Time) %>% 
+  head(10)
+
+sprint.m.df %>% 
+  group_by(Country) %>% 
+  summarize(Time = min(Time)) %>% 
+  arrange(Time) %>% 
+  head(10)
+```
+
+- **1c.** Rewrite your solution in the last part using base R. Hint: `tapply()` gives probably the easiest route here. Note: your code here shouldn't be too much more complicated than your code in the last part.
+
+```{r}
+x1 <- as.data.frame(sort(tapply(sprint.m.df$Time, sprint.m.df$Country, FUN = min),
+                         decreasing = FALSE)[1:10])
+colnames(x1) <- "Time"
+x2 <- as.data.frame(sort(tapply(sprint.m.df$Time, sprint.m.df$City, FUN = min),
+                         decreasing = FALSE)[1:10])
+colnames(x2) <- "Time"
+x1
+x2
+```
+
+- **1d.** Compute, for each country, the quadruple: (Name, City, Country, Time) corresponding to the athlete with the fastest time among athletes from that country. Display the first 10 results, ordered by increasing time. If there are ties, then show all the results that correspond to the fastest time. Repeat the same computation, but for the fastest time per city. Hint: `group_by()`, `filter()`, `select()`.
+
+```{r}
+sprint.m.df %>% 
+  group_by(Country) %>% 
+  filter(Time == min(Time)) %>% 
+  select(Name, City, Country, Time) %>% 
+  arrange(Time)
+
+sprint.m.df %>% 
+  group_by(City) %>% 
+  filter(Time == min(Time)) %>% 
+  select(Name, City, Country, Time) %>% 
+  arrange(Time)
+```
+
+- **1e.** Rewrite the rest of your solution in the last part using base R. You should end up with two data frames (per country, and per city) with the exact same structure as in the last part, and display the top 10 rows of each, ordered by increasing time. Hint: there are various routes to go; one strategy is to use `split()`, followed by `lapply()` with a custom function call, and then `rbind()` to get things in a data frame form. Note: your code here will probably be more complicated, or at least less intuitive, than your code in the last part.
+
+```{r}
+c1 <- lapply(split(sprint.m.df, sprint.m.df$Country), function(y) y[y$Time==min(y$Time),])
+c1 <- do.call("rbind", c1)
+c1 <- c1[,c("Name", "City", "Time")]
+c1 <- c1[order(c1$Time),]
+
+c2 <- lapply(split(sprint.m.df, sprint.m.df$City), function(y) y[y$Time==min(y$Time),])
+c2 <- do.call("rbind", c2)
+c2 <- c2[,c("Name", "Country", "Time")]
+c2 <- c2[order(c2$Time),]
+
+head(c1, 10)
+head(c2, 10)
+```
+
+- **1f.** With the most minor modification to your code possible, do the same computations as in Q1d, but now when there are ties, pick only one of the relevant results arbitrarily (e.g., uniformly at random is fine).
+
+```{r}
+sprint.m.df %>% 
+  group_by(Country) %>% 
+  filter(Time == min(Time)) %>%
+  sample_n(1) %>% 
+  select(Name, City, Country, Time) %>%
+  arrange(Time)
+
+sprint.m.df %>% 
+  group_by(City) %>% 
+  filter(Time == min(Time)) %>%
+  sample_n(1) %>% 
+  select(Name, City, Country, Time) %>%
+  arrange(Time)
+```
+
+Practice with pivoting wider and longer
+===
+
+In the following, use pipes and `dplyr` or `tidyr` verbs to solve each part as cleanly/succintly as you can. In some parts, it might make more sense to use direct indexing, and that's perfectly fine.
+
+- **2a.** From `sprint.m.df`, define a reduced data frame `dat.reduced` as follows. For each athlete, and each city, compute the median of all times they recorded in this city. Your new data frame `dat.reduced` should have 1787 rows and 3 columns (Name, City, Time). Confirm that it has these dimensions, and display its first 10 entries. 
+
+```{r}
+dat.reduced <- sprint.m.df %>%
+  group_by(Name, City) %>% 
+  summarise(Time = median(Time)) %>% 
+  select(Name, City, Time)
+dat.reduced
+```
+
+- **2b.** The data frame `dat.reduced` is said to be in "long" format: it has observations on the rows, and variables (Name, City, Time) on the columns. Use `pivot_wider()` to convert this into "wide" format, and call the result `dat.wide`. Here the first column should be the athlete names, and the remaining columns should correspond to the cities. *Please you the `arrange` function (2x) to get the columns (beside the `Name` column) and rows in alphabetical order. Apart from the first column, each entry gives the median time recorded by the athlete in this city. What are the dimensions of `dat.wide`, and do these make sense to you? 
+
+```{r}
+dat.wide <- pivot_wider(dat.reduced, names_from="City", values_from="Time") %>% 
+  arrange(Name) %>% 
+  select("Name", sort(colnames(.)))
+
+dat.wide
+```
+
+The dimensions are now 307x321, which makes sense because there were 307 names in the previous dataframe and 321 total races sounds about right.
+
+- **2c.** Not counting the names in the first column, how many non-`NA` values does `dat.wide` have? Does this make sense to you? It should. Reason how could you have guessed this number ahead of time, without even calling `pivot_wider()`, based only on `dat.reduced`?
+
+```{r}
+sum(sapply(dat.wide, function(x) sum(is.na(x))))
+```
+
+There are 96453 total NAs of a possible 98547. This makes sense because races usually only have <10 people, so each race will exclude the majority of the athletes in this data. You could have reasoned this out from dat.reduced by taking the number of athletes times the total amount of cities and subtracting the number of individual times. 
+
+- **2d.** From `dat.wide`, look at the row for "Usain Bolt", and determine the city names that do not have `NA` values. These should be the cities in which he raced. Determine these cities directly from `dat.reduced`, and confirm that they match.
+
+```{r}
+not_na <- function(x) {!(is.na(x))}
+dat.wide %>% 
+  filter(Name=="Usain Bolt") %>% 
+  select_if(not_na)
+
+dat.reduced[dat.reduced$Name=="Usain Bolt",]
+```
+
+- **2e.** Use `pivot_longer()` to convert `dat.wide` back into "long" format, and call the result `dat.long`. Remove rows that have `NA` values (hint: you can do this by setting `values_drop_na=TRUE` in the call to `pivot_longer()`), and order the rows alphabetically by athlete and city name. Once you've done this, `dat.wide` should have matching entries to `dat.reduced`; confirm that this is the case.
+
+```{r}
+dat.long <- pivot_longer(dat.wide, names_to = "City", values_to = "Time", 
+                         cols = 2:321, values_drop_na = TRUE)
+dat.long <- dat.long %>% 
+  arrange(Name, City)
+head(dat.reduced)
+head(dat.long)
+```
+
+Practice with joins
+===
+
+Below we read in a data frame `sprint.w.df` containing the top women's times in the 100m sprint, as seen in previous labs. In the following, use pipes and `dplyr` verbs to solve each part as cleanly/succintly as you can. Note: you'll receive warnings when you make joins about the conversion of factors to characters, and that's fine, don't worry about it.
+
+```{r}
+sprint.w.df = read.table(
+  file="http://www.stat.cmu.edu/~ryantibs/statcomp/data/sprint.w.dat",
+  sep="\t", header=TRUE, quote="", stringsAsFactors=TRUE)
+```
+
+- **3a.** As in Q1f, compute for each country, the triplet (Name, Country, Time) corresponding to the male athlete with the fastest time among athletes from that country, and breaking ties arbitrarily. Instead of displaying the results, save the resulting data frame as `dat.m`. Importantly, at the end of your flow of pipe commands used to define `dat.m`, make sure to call `ungroup()`. This will assure that `dat.m` has no groupings associated with it. Do the same for the women, and call the result `dat.w`. Report the dimensions of `dat.m` and `dat.w`, and check that they make sense to you.
+
+```{r}
+dat.m <- sprint.m.df %>% 
+  group_by(Country) %>% 
+  filter(Time == min(Time)) %>%
+  sample_n(1) %>% 
+  select(Name, Country, Time) %>%
+  arrange(Time) %>% 
+  ungroup
+
+dat.w <- sprint.w.df %>% 
+  group_by(Country) %>% 
+  filter(Time == min(Time)) %>% 
+  sample_n(1) %>% 
+  select(Name, Country, Time) %>% 
+  arrange(Time) %>% 
+  ungroup
+
+head(dat.m)
+head(dat.w)
+```
+
+- **3b.** Perform an inner join, using `inner_join()`, of `dat.m` and `dat.w`, with the join done by the Country column. Call the resulting data frame `dat.ij`, and display its first 10 rows. How many rows does it have in total? Show how could you have arrived at this number ahead of time, from `dat.m$Country` and `dat.w$Country` (hint: `intersect()`). Count the number of `NA` values in `dat.ij`: this should be zero.
+
+```{r}
+dat.ij <- inner_join(x=dat.m, y=dat.w, by="Country")
+head(dat.ij, 10)
+length(dat.ij$Name.x)
+length(intersect(dat.w$Country, dat.m$Country))
+sum(colSums(is.na(dat.ij)))
+```
+
+There are 21 total rows. You could have found this value beforehand by intersecting the country columns and counting the total.
+
+- **3c.** Perform a left join, using `left_join()`, of `dat.m` and `dat.w`, with the join again done by the Country column. Call the resulting data frame `dat.lj`, and display its first 10 rows. How many rows does it have in total? Explain why this makes sense. Count the number of `NA` values in `dat.lj`: this should be 50. Show how you could have arrived at this number from `dat.m$Country` and `dat.w$Country` (hint: `setdiff()`).
+
+```{r}
+dat.lj <- left_join(x=dat.m, y=dat.w, by="Country")
+head(dat.lj, 10)
+length(dat.lj$Name.x)
+sum(colSums(is.na(dat.lj)))
+2*length(setdiff(dat.m$Country, dat.w$Country))
+```
+
+It has 46 total rows. This makes sense because it will now include male observations from countries with no female observation. You could have arrived at this number beforehand by counting male observations with no female counterpart and calculating two times this number.
+
+- **3d.** Finally, perform an full join, using `full_join()`, of `dat.m` and `dat.w`, with the join again done by the Country column. Call the resulting data frame `dat.fj`. How many rows does it have in total? Show how you could have arrived at this number from `dat.m$Country` and `dat.w$Country` (hint: `union()`). Count the number of `NA` values in `dat.fj`: this should be 80. **Challenge**: show how you could have arrived at this number from `dat.m$Country` and `dat.w$Country`. 
+
+```{r}
+dat.fj <- full_join(x=dat.m, y=dat.w, by="Country")
+length(dat.fj$Name.x)
+length(union(dat.m$Country, dat.w$Country))
+sum(colSums(is.na(dat.fj)))
+2*length(setdiff(dat.m$Country, dat.w$Country)) + 2*length(setdiff(dat.w$Country, dat.m$Country))
+```
+
+This dataframe has 61 rows. You could have computed this beforehand by taking the size of the union of the countries from each dataframe. You could have counted the total amount of NA values beforehand by taking the total number of countries not in the union and multiplying it by two, as I did above.
+
+More grouping and joining
+===
+
+Below is some solution code from Lab 8, where we convert the Birthdate and Date columns in the `sprint.m.df` and `sprint.w.df` data frames to numeric form. In what follows, you will resolve some of the questions from Lab 8, but using pipes and `dplyr`, `tidyr`.
+
+```{r}
+date.to.numeric = function(val) {
+  val = as.character(val)
+  vec = strsplit(val, split  = "\\.")[[1]]
+  if (nchar(vec[3]) == 2) vec[3] = paste0("19", vec[3])
+  vec = as.numeric(vec)
+  vec[3]*10^4 + vec[2]*10^2 + vec[1]
+}
+
+sprint.m.df$Birthdate = sapply(sprint.m.df$Birthdate, date.to.numeric)
+sprint.m.df$Date = sapply(sprint.m.df$Date, date.to.numeric)
+sprint.w.df$Birthdate = sapply(sprint.w.df$Birthdate, date.to.numeric)
+sprint.w.df$Date = sapply(sprint.w.df$Date, date.to.numeric)
+
+head(sprint.m.df, 5)
+head(sprint.w.df, 5)
+```
+
+- **4a.** Here you'll effectively resolve Q2c and Q2d from Lab 8, using one single flow of pipe commands, for each of the `sprint.m.df` and `sprint.w.df` data frames. In particular, define a new column CityDate given by concatenating the City and Date columns separated by a "." (hint: `unite()`), then keep only the row with the fastest time for each value of CityDate (breaking ties arbitrarily), then sort the rows by increasing Time Call the resulting data frames `dat.m.cd` and `dat.w.cd`. Make sure in the last line of pipe commands use to define them, you call `ungroup()`. Check that these data frames have dimensions 1253 x 7 and 921 x 7, respectively, and display the first 5 rows of each.
+
+```{r}
+dat.m.cd <- sprint.m.df %>% 
+  unite(CityDate, City, Date, sep=".") %>% 
+  group_by(CityDate) %>% 
+  filter(Time==min(Time)) %>% 
+  sample_n(1) %>% 
+  arrange(Time) %>% 
+  ungroup
+
+dat.w.cd <- sprint.w.df %>% 
+  unite(CityDate, City, Date, sep=".") %>% 
+  group_by(CityDate) %>% 
+  filter(Time==min(Time)) %>% 
+  sample_n(1) %>% 
+  arrange(Time) %>% 
+  ungroup
+
+head(dat.m.cd, 5)
+head(dat.w.cd, 5)
+```
+
+- **4b.** Now you'll effectively resolve Q3 on Lab 8, using one single flow of pipe commands, for each of the `sprint.m.df` and `sprint.w.df` data frames. In particular, do an inner join between `dat.m.cd` and `dat.w.cd` by CityDate, then drop the Rank.x, Rank.y, Birthdate.x, Birthdate.y columns. Call the resulting data frame `dat.cd` and check that its dimensions are 377 x 9. Display its first 10 rows, and check that it has no `NA` values.
+
+```{r}
+dat.cd <- inner_join(x=dat.m.cd, y=dat.w.cd, by="CityDate") %>% 
+  select(-c("Rank.x", "Rank.y", "Birthdate.x", "Birthdate.y"))
+dim(dat.cd)
+head(dat.cd, 10)
+sum(colSums(is.na(dat.cd)))
+```
+
+- **4c.** Reproduce the plot you made in Q3d on Lab 8, of Time.y (women's time) versus Time.x (men's time), from the `dat.cd` data frame. As a reminder, a positive correlation here would indicate some kind of "track meet effect". Call `cor.test()` on Time.x and Time.y and report the p-value. This should all look exactly the same as in Q3d from Lab 8, it's just a check of reproducibility.
+
+```{r}
+plot(dat.cd$Time.y, dat.cd$Time.x,
+     main="Same Event Male vs. Female Best", xlab="Female Winner", ylab="Male Winner")
+cor.test(dat.cd$Time.y, dat.cd$Time.x)
+```
+
+- **Challenge.** In one single flow of pipe commands, for each of `sprint.m.df` and `sprint.w.df` (i.e., without saving an intermediate object `dat.cd`), reproduce the results in Q4b and Q4c. You don't have to worry about reporting the dimensions of the joined data frame or displaying its first 10 rows; just complete the inner join, produce the plot, and report the p-value from `cor.test()`. Hint: to produce the plot *before* you report the p-value from `cor.test()`, you're going to have to use the "tee" operator `%T>%` so that the pipe flow doesn't terminate prematurely. 
+
+```{r}
+# dplyr inserts df into cor.test regardless of using dot operator...
+dat.m.cd %>% 
+  inner_join(y=dat.w.cd, by="CityDate") %T>% 
+  plot(Time.x ~ Time.y, data=.,
+       main="Same Event Male vs. Female Best", xlab="Female Winner", ylab="Male Winner") %>% 
+  summarize(coef = cor.test(.$Time.x, .$Time.y)$estimate,
+            pval = cor.test(.$Time.x, .$Time.y)$p.value)
+```
+
+Split-apply-combine with `nest`ing (optional)
+===
+
+Sometimes you'd like to preform analysis conditional on a set of groups (think back to the times you've used `tapply`). There's a paradigm called "split-apply-combine" that defines the steps you'd need to take to preform this type of analysis. In the "tidyverse" this approach can be done using the `nest`ing commands from `tidyr`.
+
+More specifically, this problem with introduce you to nesting (`nest` and `unnest`) as well as the functions `purrr::map` and some functions from the package `broom`. Lecture slide #21 provides a link to a [lecture](https://benjaminleroy.github.io/documents/36350/Lectures/6.2_advanced_computing_slides.html) ([Rmd](https://benjaminleroy.github.io/documents/36350/Lectures/6.2_advanced_computing.Rmd), [html](https://benjaminleroy.github.io/documents/36350/Lectures/6.2_advanced_computing.html)) that covers most of the material in this problem.
+
+---
+
+For this problem we'll be looking at a slightly different dataset that can be loaded in using the following:
+
+```{r}
+sprint.best.full.df = read.table(
+  file="http://www.stat.cmu.edu/~ryantibs/statcomp/data/sprint.best.full.dat", 
+  header=TRUE, sep="\t", quote="", stringsAsFactors=TRUE)
+```
+
+This dataset contains information about the best sprinters (conditional on gender) for each year. It contains 3 new columns compared to the above data frames:
+
+1. `Gender` (factor): indicates which gender the runner was
+2. `Year` (integer): which year the time was recorded
+3. `Year.centered` (integer): relative year 
+
+---
+
+Suppose we were interested in examine the relationship between the best time relative to the year and wind speed conditional on gender. In a linear model, we could model 
+
+```
+Time ~ Wind*Gender + Year.centered*Gender + Gender
+```
+
+but today we will instead look at making 2 models (filtering the data by gender) and then looking at the below relationship:
+
+```
+Time ~ Wind + Year.centered
+```
+
+---
+
+- **6a.** Run the following line of code (note you'll need to remove the "eval = FALSE"). What is the size of nested.df? What are the column names? Examine the element `nested.df$data[[1]]` and describe it (please also identify what subgroup it belongs to).
+
+```{r}
+nested.df = sprint.best.full.df %>% 
+  group_by(Gender) %>%
+  nest()
+```
+
+nested.df is 2x2. The column names are Gender and data. nested.df$data[[1]] is equal to sprint.m.df, the dataframe containing men's sprint times.
+
+- **6b.** You probably noticed in the last part that the `nest` function "nested" the proportion of the `sprint.best.df.full` associated to the specific gender into the column `data` in the `nested.df`. The `nest` function along with the `map` function from purrr allows us to preform similar operation in a "tidyverse" way as you learned when you used things like `tapply` and `lapply`.
+
+Suppose, at the end of the day we wanted to compare linear model $\beta$ coefficients between the two models (1 built with male data, one with female data). The first thing we'd need to do would be to run the linear also as described above. For a single dataset we could do something like what is demonstrated below.
+
+```{r eval = F}
+purrr::map(nested.df$data[1],function(df) lm(Time ~ Wind + Year.centered, data = df))
+#or
+lapply(nested.df$data[1],function(df) lm(Time ~ Wind + Year.centered, data = df))
+```
+
+In "tidyverse" land, let's use `purrr::map`. We can create (and store) these linear models into our data frames using mutate, specifically we can do the following (make sure to change the "eval = T":
+
+```{r eval=T}
+nested.df = nested.df %>%
+  mutate(model = map(data, function(df) lm(Time ~ Wind + Year.centered, data = df)))
+# if for some reason the above doesn't work, try:
+# my.lm.func = function(df) lm(Time ~ Wind + Year.centered, df)
+# nested.df = nested.df %>%
+#   mutate(model = map(data, my.lm.func))
+```
+
+Check what columns `nested.df` contains. What is the new column's name? What class of object is stored in each element?
+
+```{r}
+colnames(nested.df)
+typeof(nested.df[1, "model"])
+```
+
+The new column's name is model and it contains a list.
+
+- **6c.** Now, we want to grab out the coefficents (and for now, suppose also the full `summary`). Update the `nested.df` such that we have a summary of each model in a new column called `sum`. Remember you should use `map` and that you're applying `summary` to the models, not the data.
+
+```{r}
+nested.df <- nested.df %>% 
+  mutate(sum = map(model, summary))
+```
+
+- **6d.** (No work, just reading) What you should be noticing is that this approach allows you to interatively write your code (which has it's benefits). Sadly we need a final step (which we provide for you). We will discuss why in the last part of this question (summary). (Make sure to correct `eval = F`.)
+
+```{r eval = T}
+nested.df <- nested.df %>% 
+  mutate(sum2 = map(sum, broom::tidy))
+```
+
+- **6e.** Now we'd like to pull out the the summary information out of this "nested" format. To do so we use the function `unnest`. We provide the code for you below. Why do you think we use `select(Gender, coef2)`? Express in words how the unnested data frame changes if we don't include that line of code.
+
+```{r eval = T}
+unnested.df <- nested.df %>%
+  select(Gender, sum2) %>%
+  unnest(sum2)
+```
+
+If we don't select gender and sum2, then we would see the rest of the data in the nested dataframe.
+
+- **6f.** Finally, create a table using that has 2 rows (for each gender) and contains the beta coefficents of each of the terms in the model (define this "table" as `beta.model.df` and print it out). Hint: you'll probably use a `pivot_*` and a `select` call. Looking at this table and back at `unnested.df` does it appear that the effect of year (conditional on Wind speed) is stronger for male runners or female runners? (Note these models isn't super amazing---so you shouldn't really see this as a take away.)
+
+```{r}
+df.wide <- pivot_wider(unnested.df, names_from="term", values_from="estimate") %>%
+  group_by(Gender) %>%
+  summarize(Intercept = max(`(Intercept)`, na.rm=TRUE),
+            Wind = max(Wind, na.rm=TRUE),
+            Year = max(Year.centered, na.rm=TRUE))
+```
+
+From this model, it appears that the men's times decrease more than women's times as the years progress.
+
+- **Summary.** You've now gotten a test of the "split-apply-combine" paradigm using `nest`/`unnest`, `purrr` and a little bit of functions from the `broom` library. This approach should appear similar to `apply` style coding but a bit more iterative. You may have noticed that we had a previous extra step in Q6d that you might not have expected; as tidyverse emphasis is on data.frames, we end up needing to work with data frame to make sure that the `unnest`ing works as expected. 
+
+Finally, we call this approach "split-apply-combine" based on the sequence of steps one takes, in this example we could seperate these sequences into:
+
+1. split: `group_by` call
+2. apply: all the `mutate(purrr::map)` style steps
+3. combine: the use of `pivot_*` to alter the final output
