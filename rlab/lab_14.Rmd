@@ -291,12 +291,11 @@ for(i in 1:length(vals)){
 colMeans(error_matrix)
 apply(error_matrix,2,sd)
 ```
-Results vary depending on the seed, but in general there appears to be a bit of a bias-variance tradeoff with selection a certain number of folds. In particular, increasing the number of folds seems to decrease the test error of the estimator, but it also increases the standard deviation of the estimates. This isn't particularly surprising because models that use one fold will be very overfit, and models that use many folds will be underfit, and both of these extremes will have a high variance in their estimates.
-
+Results vary depending on the seed, but in general there appears to be a bit of a bias-variance tradeoff with selecting a certain number of folds. In particular, increasing the number of folds seems to decrease the test error of the estimator, but it also increases the standard deviation of the estimates. This isn't particularly surprising because models that use one fold will be very overfit, and models that use many folds will be underfit, and both of these extremes will have a high variance in their estimates.
 
 - **Challenge.** In general, is 2-fold cross-validation the same as sample-splitting? Why or why not?
 
-It's a little bit difference because when you use two folds, you will still train your model on both folds and evaluate the test error on both folds, whereas with sample splitting you will strictly use one fold for training and one fold for evaluation.
+It's a little bit different because when you use two folds, you will still train your model on both folds and evaluate the test error on both folds, whereas with sample splitting you will strictly use one fold for training and one fold for evaluation.
 
 - **Challenge.** In general, what can you say about the differences in cross-validation as the number of folds varies? What is different about cross-validation with 2 folds, versus 5 folds, versus $n$ folds (with $n$ being the number of observations in the data set)?
 
