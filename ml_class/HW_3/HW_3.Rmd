@@ -1,0 +1,126 @@
+---
+title: "Homework 3"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Rufus Petrie
+
+Professors Magnolfi and Sullivan
+
+Machine Learning
+
+26 October, 2018
+
+Note: I silenced the code to generate the data and regressions for this problem set. They are still visible in the included RMD and script file.
+
+```{r,include=TRUE,echo=FALSE,results='hide',message=FALSE}
+rm(list=ls())
+library(tidyverse)
+library(glmnet)
+library(knitr)
+load(file="market_level.R")
+load(file="market_airline_level.R")
+set.seed(0)
+train=sample(1:nrow(datam),nrow(datam)-1000)
+test=(-train)
+
+datama <- datama %>%
+  group_by(origin_airport_id,dest_airport_id) %>%
+  summarise(AA = 1*('AA' %in% ticket_carrier))
+datam <- left_join(datam,datama,
+                   by=c("origin_airport_id"="origin_airport_id",
+                        "dest_airport_id"="dest_airport_id"))
+datam <- datam %>% 
+  mutate(competitors = ifelse(AA==1, num_carriers-1, num_carriers))
+rm(datama)
+
+x <- data.frame("competitors"=1:10)
+lm.fit=lm(AA ~ competitors, data=datam[train,])
+lm.preds=predict(lm.fit,newdata=x,type="response")
+lm.preds <- data.frame("competitors"=1:10,probability=lm.preds)
+
+lr.fit=glm(AA~competitors, data=datam[train,], family=binomial)
+lr.preds=predict(lr.fit,newdata=x,type="response")
+lr.preds <- data.frame("competitors"=1:10,probability=lr.preds)
+
+pr.fit=glm(AA~competitors, data=datam[train,], family=binomial(link="probit"))
+pr.preds=predict(pr.fit,newdata=x,type="response")
+pr.preds <- data.frame("competitors"=1:10,probability=pr.preds)
+
+freq <- datam[train,] %>%
+  group_by(competitors) %>%
+  summarise(probability = (sum(AA) / n() ))
+```
+
+# Question 4
+Below are the conditional probabilities of entering a market given a certain number of competitors observed in the training data. Note that American Airlines has no monopolies, so the probability estimates start from one competitor.
+```{R,include=TRUE,echo=FALSE}
+kable(freq,format="markdown")
+```
+
+\newpage
+# Question 5
+```{R,inclue=TRUE,echo=FALSE}
+ggplot() +
+  geom_point(aes(x=competitors,y=probability),
+            data=lm.preds) +
+  geom_point(aes(x=competitors,y=probability),
+            data=pr.preds,color='red',alpha=0.5) +
+  geom_point(aes(x=competitors,y=probability),
+             data=lr.preds,color='blue',alpha=0.5) +
+  scale_x_discrete(limits=1:10) +
+  ggtitle("Probability of market entry given number of competitors")
+```
+In the graph above, the black dots are the linear model, the red dots are the probit mode, and the blue dots are the logistic model. All three have fairly similar behavior.
+The probit and logistic models both have similar intercepts at around 0.2, but the linear model has a much higher intercept at about 0.4. Afterwards, all three estimates stay somewhat close to each other until after 5 competitors, at which point the probit and logistic models reach a horizontal asymptote, but the linear model estimates continue to increase. Notice that the blue logistic predictions begin underneath the probit predictions but then become higher. This makes sense because the logistic distribution has fatter tails than the normal distribution, so we should expect higher probabilites for extreme values ex ante.
+
+We probably shouldn't interpret these coefficients causally. Because we only include the number of competitors as an estimator, there are a ton of other factors correlated with market size that could explain AA's entry decision. For instance, the profitability of a market is highly likely to induce AA's entry, but profitability is also likely correlated with the number of flights, competitors, etc.
+
+# Question 6
+```{R,include=TRUE,echo=FALSE,message=FALSE}
+x=model.matrix(AA~polym(competitors,average_distance_m,market_size,hub_route,
+                        vacation_route,slot_controlled,market_income,degree=2,
+                        raw=TRUE),data=datam)[,-1]
+y=datam$AA
+
+cv.out=cv.glmnet(x[train,],y[train],alpha=1,family="binomial")
+bestlam=(cv.out$lambda.min)
+
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+lm.SE=(sum((datam[test,]$AA-lm.pred)^2))
+
+lr.pred=predict(lr.fit,data.frame(datam[test,]),type="response")
+lr.SE=(sum((datam[test,]$AA-lr.pred)^2))
+
+pr.pred=predict(pr.fit,data.frame(datam[test,]),type="response")
+pr.SE=(sum((datam[test,]$AA-pr.pred)^2))
+
+vect <- as.vector(freq[2])
+datam$prediction=0
+for(i in 1:10){
+  datam$prediction[datam$competitors==i] <- as.numeric(vect[i,1])
+}
+bi.SE=(sum((datam[test,]$AA-datam[test,]$prediction)^2))
+
+ll.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+ll.pred=predict(ll.mod,s=bestlam,newx=x[test,])
+ll.SE=(sum((ll.pred-y[test])^2))
+
+print(paste0("The optimal lambda value equals: ",bestlam))
+```
+
+\newpage
+# Question 7
+```{R,include=TRUE,echo=FALSE}
+errors <- matrix(c(lm.SE,pr.SE,lr.SE,bi.SE,ll.SE),
+                 ncol=1,byrow=TRUE)
+rownames(errors) <- c("Linear","Probit","Logistic","Bayesian","Logistic Lasso")
+colnames(errors) <- c("Sum of Squared Errors")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+```
+From the table, we see that the linear model had the worst performance, followed by the probit, the logic, the bayesian classifier, and then finally the logistic lasso. Note that the bayesian classifier is produced by making predictions off of the observed probability in the training data. This implies that American Airlines probably has a highly nonlinear decision condition for entering a market. The probit, logic, and linear models all have a linear functional form, but the bayesian classifier (with no functional assumptions) and the logistic lasso (with a polynomial functional form) are both more flexible and perform better. However, we should note that although the bayesian and logistic lasso models perform better in terms of predicted probabilities, all models have similar performance in terms of predictions because they all basically assume that AA will enter a market if there are more than two competitors.

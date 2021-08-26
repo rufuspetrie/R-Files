@@ -1,0 +1,545 @@
+---
+title: "Homework #2"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Rufus Petrie
+
+Professors Magnolfi and Sullivan
+
+Machine Learning
+
+9 October, 2018
+
+Note: Because the code to clean the data outputted a lot of useless information, I have silenced it in this file. The code is still visible in the script and Rmarkdown files included in this folder.
+
+```{r,include=TRUE,echo=FALSE,results='hide',message=FALSE}
+rm(list=ls())
+library(tidyverse)
+library(knitr)
+library(leaps)
+library(glmnet)
+library(leaps)
+load(file="airline_data_market_level.R")
+load(file="lookup_and_hub_r.R")
+lookup_and_hub <- lookup_and_hub %>% 
+  transmute(Code,
+            Hub = 1*(rowSums(.[4:134])>0))
+datam <- left_join(datam,lookup_and_hub,
+                   by=c("origin_airport_id"="Code"))
+datam <- left_join(datam,lookup_and_hub,
+                   by=c("dest_airport_id"="Code"))
+datam <- datam %>%
+  mutate(Hub = 1*((Hub.x+Hub.y)>0))
+datam <- subset(datam,
+             select=-c(Hub.x,Hub.y))
+rm(lookup_and_hub)
+load(file="vacations.R")
+datam <- left_join(datam,vacations,
+                   by=c("origin_city"="origin_cities"))
+datam <- left_join(datam,vacations,
+                   by=c("dest_city"="origin_cities"))
+datam <- datam %>%
+  mutate(Vacation_spot= 1*((vacation_spot.x+vacation_spot.y)>0))
+datam <- subset(datam,
+                select=-c(vacation_spot.x,vacation_spot.y))
+rm(vacations)
+load(file="data_income.R")
+datam <- left_join(datam,msa_income,
+                   by=c("origin_city"="city"))
+datam <- left_join(datam,msa_income,
+                   by=c("dest_city"="city"))
+datam <- datam %>%
+  mutate(Mean_income=sqrt(median_income.x*median_income.y))
+datam <- subset(datam,
+                select=-c(median_income.x,median_income.y))
+rm(msa_income)
+load(file="slot_controlled.R")
+datam <- left_join(datam,slot_controlled,
+                   by=c("origin_airport_id"="airport"))
+datam <- left_join(datam,slot_controlled,
+                   by=c("dest_airport_id"="airport"))
+datam <- datam %>%
+  mutate(Slot_controlled=1*((slot_controlled.x+slot_controlled.y)>0))
+datam <- subset(datam,
+                select=-c(slot_controlled.x,slot_controlled.y))
+rm(slot_controlled)
+invisible(datam[with(datam,order("origin_airport_id","dest_airport_id"))])
+```
+
+```{r,include=TRUE,echo=FALSE,results='hide',message=FALSE}
+set.seed(0)
+train=sample(1:nrow(datam),nrow(datam)/2)
+test=(-train)
+```
+
+# Question 3
+```{r,include=TRUE,echo=FALSE}
+lm.fit=lm(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+            average_distance_m+market_size, data=datam[train,])
+out=(summary(lm.fit)$adj.r.squared)
+print(paste0("The adjusted r-squared equals: ",out))
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+out=mean((datam[test,]$num_carriers-lm.pred)^2)
+print(paste0("The test MSE equals: ",out))
+```
+
+# Question 4
+```{r,include=TRUE,echo=FALSE,warning=FALSE}
+lm.poly=lm(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                              average_distance_m,market_size,degree=2,raw=TRUE),
+           data=datam[train,])
+out=(summary(lm.poly)$adj.r.squared)
+print(paste0("The adjusted r-squared equals: ",out))
+lm.pred=predict(lm.poly,data.frame(datam[test,]))
+out=(mean((datam[test,]$num_carriers-lm.pred)^2))
+print(paste0("The test MSE equals: ",out))
+```
+
+# Question 5
+```{r,include=TRUE,echo=FALSE,warning=FALSE,message=FALSE}
+models <- regsubsets(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                      average_distance_m,market_size,degree=2,raw=TRUE),
+                     data = datam[train,],method = "backward",nvmax=28)
+models.summary = summary(models)
+test.mat=model.matrix(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,                                         average_distance_m,market_size,degree=2,raw=TRUE),
+                      data=datam[test,])
+# By adjr2:
+coefi=coef(models,id=which.max(models.summary$adjr2))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("The test MSE for the model selected by adjusted r-squared equals: ",out))
+# By BIC:
+coefi=coef(models,id=which.max(which.min(models.summary$bic)))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("The test MSE for the model selected by BIC equals: ",out))
+```
+Both of these models perform significantly worse than the simple linear model. This is likely because by selecting the model that has the best in-sample adjusted r-squared or BIC, we are overfitting the model to the dataset.
+
+# Question 6
+```{r,include=TRUE,echo=FALSE}
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+               average_distance_m+market_size,data=datam)[,-1]
+y=datam$num_carriers
+nmse <- function(alp,lam){
+  ridge.mod=glmnet(x[train,],y[train],alpha=alp,lambda=lam)
+  ridge.pred=predict(ridge.mod,s=lam,newx=x[test,])
+  return(mean((ridge.pred-y[test])^2))
+}
+errors <- matrix(c(nmse(0,0),nmse(0,1),nmse(0,2),
+                   nmse(1,0),nmse(1,1),nmse(1,2)),
+                 ncol=3,byrow=TRUE)
+colnames(errors) <- c("lambda=0","lambda=1","lambda=2")
+rownames(errors) <- c("ridge","lasso")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+```
+Above is a table describing the test MSE for the ridge/lasso models with varying penalty parameters. Notice that the predictive performance of the model decreases as the penalty increases. This is likely because the simple linear model is underfitted, i.e. adding more interactions or squared terms could help the predictive performance.
+
+\newpage
+# Question 7
+```{r,include=TRUE,echo=FALSE}
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+bestlam=cv.out$lambda.min
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=bestlam)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((ridge.pred-y[test])^2)
+print(paste0("The test MSE for the 10-fold CV ridge equals: ",out))
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+bestlam=cv.out$lambda.min
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+lasso.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((lasso.pred-y[test])^2)
+print(paste0("The test MSE for the 10-fold CV lasso equals: ",out))
+```
+As we can see, the ridge and lasso models have comparable performance to the simple linear model. As I mentioned before, this is likely because the simple linear model is underfitted, meaning that it would achieve better predictive performance if it had more interaction or polynomial terms. We can see this because of the models predicted so far, the polynomial model with no selection had the lowest test MSE (albeit this was only predicted using a 50/50 test train split). However, the ridge and lasso models still perform better than the selected polynomial model, which was likely overfitted to the training set because of its poor out of sample performance.
+
+# Question 8
+Of the linear models proposed, I believe that simple regression is most appropriate. Both the ridge and the lasso models had very low penalty parameters, which resulted in the test MSE values being close to the linear regression test MSE. Although the simple regression is only evaluted on a test/train split (it would be nice to do k-fold cv for it), it appears that a linear model may be underspecified, i.e. it is not flexible enough. Therefore, it might be possible to find a nonlinear model that performs better than the linear regression, but we would need to test some more models.
+
+# Question 9
+## 10/90 train/test split
+```{r,include=TRUE,echo=FALSE,warning=FALSE}
+train=sample(1:nrow(datam),nrow(datam)/10)
+test=(-train)
+
+lm.fit=lm(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+            average_distance_m+market_size, data=datam[train,])
+out=(summary(lm.fit)$adj.r.squared)
+print(paste0("Linear model adjusted r-squared equals: ",out))
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+out=mean((datam[test,]$num_carriers-lm.pred)^2)
+print(paste0("Linear model test MSE equals: ",out))
+
+lm.poly=lm(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                              average_distance_m,market_size,degree=2,raw=TRUE),
+           data=datam[train,])
+out=(summary(lm.poly)$adj.r.squared)
+print(paste0("Polynomials adjusted r-squared equals: ",out))
+lm.pred=predict(lm.poly,data.frame(datam[test,]))
+out=(mean((datam[test,]$num_carriers-lm.pred)^2))
+print(paste0("Polynomial test MSE equals: ",out))
+
+models <- regsubsets(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                      average_distance_m,market_size,degree=2,raw=TRUE),
+                     data = datam[train,],method = "backward",nvmax=28)
+models.summary = summary(models)
+test.mat=model.matrix(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,                                         average_distance_m,market_size,degree=2,raw=TRUE),
+                      data=datam[test,])
+# By adjr2:
+coefi=coef(models,id=which.max(models.summary$adjr2))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with adjusted r-squared test MSE equals: ",out))
+# By BIC:
+coefi=coef(models,id=which.max(which.min(models.summary$bic)))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with BIC test MSE equals: ",out))
+
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+               average_distance_m+market_size,data=datam)[,-1]
+y=datam$num_carriers
+nmse <- function(alp,lam){
+  ridge.mod=glmnet(x[train,],y[train],alpha=alp,lambda=lam)
+  ridge.pred=predict(ridge.mod,s=lam,newx=x[test,])
+  return(mean((ridge.pred-y[test])^2))
+}
+errors <- matrix(c(nmse(0,0),nmse(0,1),nmse(0,2),
+                   nmse(1,0),nmse(1,1),nmse(1,2)),
+                 ncol=3,byrow=TRUE)
+colnames(errors) <- c("lambda=0","lambda=1","lambda=2")
+rownames(errors) <- c("ridge","lasso")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+bestlam=cv.out$lambda.min
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=bestlam)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((ridge.pred-y[test])^2)
+print(paste0("10-fold CV ridge test MSE equals: ",out))
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+bestlam=cv.out$lambda.min
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+lasso.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((lasso.pred-y[test])^2)
+print(paste0("10-fold CV lasso test MSE equals: ",out))
+
+```
+\newpage
+## 2/98 train/test split
+```{r,include=TRUE,echo=FALSE,warning=FALSE}
+train=sample(1:nrow(datam),nrow(datam)/50)
+test=(-train)
+
+lm.fit=lm(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+            average_distance_m+market_size, data=datam[train,])
+out=(summary(lm.fit)$adj.r.squared)
+print(paste0("Linear model adjusted r-squared equals: ",out))
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+out=mean((datam[test,]$num_carriers-lm.pred)^2)
+print(paste0("Linear model test MSE equals: ",out))
+
+lm.poly=lm(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                              average_distance_m,market_size,degree=2,raw=TRUE),
+           data=datam[train,])
+out=(summary(lm.poly)$adj.r.squared)
+print(paste0("Polynomials adjusted r-squared equals: ",out))
+lm.pred=predict(lm.poly,data.frame(datam[test,]))
+out=(mean((datam[test,]$num_carriers-lm.pred)^2))
+print(paste0("Polynomial test MSE equals: ",out))
+
+models <- regsubsets(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                      average_distance_m,market_size,degree=2,raw=TRUE),
+                     data = datam[train,],method = "backward",nvmax=28)
+models.summary = summary(models)
+test.mat=model.matrix(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,                                         average_distance_m,market_size,degree=2,raw=TRUE),
+                      data=datam[test,])
+# By adjr2:
+coefi=coef(models,id=which.max(models.summary$adjr2))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with adjusted r-squared test MSE equals: ",out))
+# By BIC:
+coefi=coef(models,id=which.max(which.min(models.summary$bic)))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with BIC test MSE equals: ",out))
+
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+               average_distance_m+market_size,data=datam)[,-1]
+y=datam$num_carriers
+nmse <- function(alp,lam){
+  ridge.mod=glmnet(x[train,],y[train],alpha=alp,lambda=lam)
+  ridge.pred=predict(ridge.mod,s=lam,newx=x[test,])
+  return(mean((ridge.pred-y[test])^2))
+}
+errors <- matrix(c(nmse(0,0),nmse(0,1),nmse(0,2),
+                   nmse(1,0),nmse(1,1),nmse(1,2)),
+                 ncol=3,byrow=TRUE)
+colnames(errors) <- c("lambda=0","lambda=1","lambda=2")
+rownames(errors) <- c("ridge","lasso")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+bestlam=cv.out$lambda.min
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=bestlam)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((ridge.pred-y[test])^2)
+print(paste0("10-fold CV ridge test MSE equals: ",out))
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+bestlam=cv.out$lambda.min
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+lasso.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((lasso.pred-y[test])^2)
+print(paste0("10-fold CV lasso test MSE equals: ",out))
+```
+## 50/50 train/test split, noise
+```{r,include=TRUE,echo=FALSE,warning=FALSE}
+datam$noise1 = datam$average_distance_m + rnorm(nrow(datam),.01)
+datam$noise2 = datam$Hub + rnorm(nrow(datam),.01)
+datam$noise3 = datam$Mean_income + rnorm(nrow(datam),.01)
+train=sample(1:nrow(datam),nrow(datam)/2)
+test=(-train)
+
+lm.fit=lm(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+            average_distance_m+market_size+noise1+noise2+noise3,
+          data=datam[train,])
+out=(summary(lm.fit)$adj.r.squared)
+print(paste0("Linear model adjusted r-squared equals: ",out))
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+out=mean((datam[test,]$num_carriers-lm.pred)^2)
+print(paste0("Linear model test MSE equals: ",out))
+
+lm.poly=lm(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                              average_distance_m,market_size,noise1,noise2,
+                              noise3,degree=2,raw=TRUE),
+           data=datam[train,])
+out=(summary(lm.poly)$adj.r.squared)
+print(paste0("Polynomials adjusted r-squared equals: ",out))
+lm.pred=predict(lm.poly,data.frame(datam[test,]))
+out=(mean((datam[test,]$num_carriers-lm.pred)^2))
+print(paste0("Polynomial test MSE equals: ",out))
+
+models <- regsubsets(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                        average_distance_m,market_size,noise1,noise2,
+                                        noise3,degree=2,raw=TRUE),
+                     data = datam[train,],method = "backward",nvmax=54)
+models.summary = summary(models)
+test.mat=model.matrix(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                         average_distance_m,market_size,noise1,noise2,
+                                         noise3,degree=2,raw=TRUE),
+                      data=datam[test,])
+# By adjr2:
+coefi=coef(models,id=which.max(models.summary$adjr2))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with adjusted r-squared test MSE equals: ",out))
+# By BIC:
+coefi=coef(models,id=which.max(which.min(models.summary$bic)))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with BIC test MSE equals: ",out))
+
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+                 average_distance_m+market_size+noise1+noise2+noise3,data=datam)[,-1]
+y=datam$num_carriers
+nmse <- function(alp,lam){
+  ridge.mod=glmnet(x[train,],y[train],alpha=alp,lambda=lam)
+  ridge.pred=predict(ridge.mod,s=lam,newx=x[test,])
+  return(mean((ridge.pred-y[test])^2))
+}
+errors <- matrix(c(nmse(0,0),nmse(0,1),nmse(0,2),
+                   nmse(1,0),nmse(1,1),nmse(1,2)),
+                 ncol=3,byrow=TRUE)
+colnames(errors) <- c("lambda=0","lambda=1","lambda=2")
+rownames(errors) <- c("ridge","lasso")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+bestlam=cv.out$lambda.min
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=bestlam)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((ridge.pred-y[test])^2)
+print(paste0("10-fold CV ridge test MSE equals: ",out))
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+bestlam=cv.out$lambda.min
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+lasso.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((lasso.pred-y[test])^2)
+print(paste0("10-fold CV lasso test MSE equals: ",out))
+```
+\newpage
+## 10/90 train/test split, noise
+```{r,include=TRUE,echo=FALSE,warning=FALSE}
+train=sample(1:nrow(datam),nrow(datam)/10)
+test=(-train)
+
+lm.fit=lm(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+            average_distance_m+market_size+noise1+noise2+noise3,
+          data=datam[train,])
+out=(summary(lm.fit)$adj.r.squared)
+print(paste0("Linear model adjusted r-squared equals: ",out))
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+out=mean((datam[test,]$num_carriers-lm.pred)^2)
+print(paste0("Linear model test MSE equals: ",out))
+
+lm.poly=lm(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                              average_distance_m,market_size,noise1,noise2,
+                              noise3,degree=2,raw=TRUE),
+           data=datam[train,])
+out=(summary(lm.poly)$adj.r.squared)
+print(paste0("Polynomials adjusted r-squared equals: ",out))
+lm.pred=predict(lm.poly,data.frame(datam[test,]))
+out=(mean((datam[test,]$num_carriers-lm.pred)^2))
+print(paste0("Polynomial test MSE equals: ",out))
+
+models <- regsubsets(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                        average_distance_m,market_size,noise1,noise2,
+                                        noise3,degree=2,raw=TRUE),
+                     data = datam[train,],method = "backward",nvmax=54)
+models.summary = summary(models)
+test.mat=model.matrix(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                         average_distance_m,market_size,noise1,noise2,
+                                         noise3,degree=2,raw=TRUE),
+                      data=datam[test,])
+# By adjr2:
+coefi=coef(models,id=which.max(models.summary$adjr2))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with adjusted r-squared test MSE equals: ",out))
+# By BIC:
+coefi=coef(models,id=which.max(which.min(models.summary$bic)))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with BIC test MSE equals: ",out))
+
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+                 average_distance_m+market_size+noise1+noise2+noise3,data=datam)[,-1]
+y=datam$num_carriers
+nmse <- function(alp,lam){
+  ridge.mod=glmnet(x[train,],y[train],alpha=alp,lambda=lam)
+  ridge.pred=predict(ridge.mod,s=lam,newx=x[test,])
+  return(mean((ridge.pred-y[test])^2))
+}
+errors <- matrix(c(nmse(0,0),nmse(0,1),nmse(0,2),
+                   nmse(1,0),nmse(1,1),nmse(1,2)),
+                 ncol=3,byrow=TRUE)
+colnames(errors) <- c("lambda=0","lambda=1","lambda=2")
+rownames(errors) <- c("ridge","lasso")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+bestlam=cv.out$lambda.min
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=bestlam)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((ridge.pred-y[test])^2)
+print(paste0("10-fold CV ridge test MSE equals: ",out))
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+bestlam=cv.out$lambda.min
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+lasso.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((lasso.pred-y[test])^2)
+print(paste0("10-fold CV lasso test MSE equals: ",out))
+```
+## 2/98 train/test split, noise
+```{r,include=TRUE,echo=FALSE,warning=FALSE}
+train=sample(1:nrow(datam),nrow(datam)/50)
+test=(-train)
+
+lm.fit=lm(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+            average_distance_m+market_size+noise1+noise2+noise3,
+          data=datam[train,])
+out=(summary(lm.fit)$adj.r.squared)
+print(paste0("Linear model adjusted r-squared equals: ",out))
+lm.pred=predict(lm.fit,data.frame(datam[test,]))
+out=mean((datam[test,]$num_carriers-lm.pred)^2)
+print(paste0("Linear model test MSE equals: ",out))
+
+lm.poly=lm(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                              average_distance_m,market_size,noise1,noise2,
+                              noise3,degree=2,raw=TRUE),
+           data=datam[train,])
+out=(summary(lm.poly)$adj.r.squared)
+print(paste0("Polynomials adjusted r-squared equals: ",out))
+lm.pred=predict(lm.poly,data.frame(datam[test,]))
+out=(mean((datam[test,]$num_carriers-lm.pred)^2))
+print(paste0("Polynomial test MSE equals: ",out))
+
+models <- regsubsets(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                        average_distance_m,market_size,noise1,noise2,
+                                        noise3,degree=2,raw=TRUE),
+                     data = datam[train,],method = "backward",nvmax=54)
+models.summary = summary(models)
+test.mat=model.matrix(num_carriers~polym(Hub,Vacation_spot,Mean_income,Slot_controlled,
+                                         average_distance_m,market_size,noise1,noise2,
+                                         noise3,degree=2,raw=TRUE),
+                      data=datam[test,])
+# By adjr2:
+coefi=coef(models,id=which.max(models.summary$adjr2))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with adjusted r-squared test MSE equals: ",out))
+# By BIC:
+coefi=coef(models,id=which.max(which.min(models.summary$bic)))
+pred=test.mat[,names(coefi)]%*%coefi
+out=(mean((datam[test,]$num_carriers-pred)^2))
+print(paste0("Polynomial selected with BIC test MSE equals: ",out))
+
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+                 average_distance_m+market_size+noise1+noise2+noise3,data=datam)[,-1]
+y=datam$num_carriers
+nmse <- function(alp,lam){
+  ridge.mod=glmnet(x[train,],y[train],alpha=alp,lambda=lam)
+  ridge.pred=predict(ridge.mod,s=lam,newx=x[test,])
+  return(mean((ridge.pred-y[test])^2))
+}
+errors <- matrix(c(nmse(0,0),nmse(0,1),nmse(0,2),
+                   nmse(1,0),nmse(1,1),nmse(1,2)),
+                 ncol=3,byrow=TRUE)
+colnames(errors) <- c("lambda=0","lambda=1","lambda=2")
+rownames(errors) <- c("ridge","lasso")
+errors <- as.table(errors)
+kable(errors,format="markdown")
+
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+bestlam=cv.out$lambda.min
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=bestlam)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((ridge.pred-y[test])^2)
+print(paste0("10-fold CV ridge test MSE equals: ",out))
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+bestlam=cv.out$lambda.min
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=bestlam)
+lasso.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+out=mean((lasso.pred-y[test])^2)
+print(paste0("10-fold CV lasso test MSE equals: ",out))
+```
+In general, the test MSE of the models decreases as we allocate more data to the test set and less to the training set. This is likely because the variance of our modle increases as we decrease the size of the training sample, which result in increasing test MSE. Furthermore, the test MSE generally decreases as we add more noise. With an equal train/test split, it looks like the noise can actually improve performance (to be expected because with mean 0, estimates will be unbiased), but the noise really hurts test MSE when the train/test split becomes uneven because the errors don't necessarily cancel out on average.
+\newpage
+# Question 10
+```{r,include=TRUE,echo=FALSE,message=FALSE}
+set.seed(0)
+train=sample(1:nrow(datam),nrow(datam)/2)
+test=(-train)
+x=model.matrix(num_carriers~Hub+Vacation_spot+Mean_income+Slot_controlled+
+                 average_distance_m+market_size,data=datam[train,])[,-1]
+y=datam[train,]$num_carriers
+models <- regsubsets(y~x,data=datam[train,],method="backward")
+summary(models)
+summary(models)$rsq
+```
+From the model selection procedure, we can see that the three most important variables for determining the number of carriers are the average distance, hub, and market size variables. After including these three variables, each additional variable included reduces the variation in the data by less than 1%.
+```{r,include=TRUE,echo=FALSE,message=FALSE}
+kable(coef(models,id=6),format="markdown")
+```
+Notice that an airport being a hub raises its predicted number of carriers by almost 1. It's harder to interpret the market size and distance variables, but the fact that these are positive seems intuitive enough.

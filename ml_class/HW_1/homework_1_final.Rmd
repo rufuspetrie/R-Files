@@ -1,0 +1,101 @@
+---
+title: "Homework #1"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup,include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Rufus Petrie
+
+Professor Magnolfi
+
+Machine Learning
+
+17 September, 2017
+
+Note: Because the code to clean the data outputted a lot of useless information, I have silenced it in this file. The code is still visible in the script and Rmarkdown files included in this folder.
+
+```{r,include=TRUE,echo=FALSE,results='hide',message=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+data = read.csv(file="~/DB1B_MARKET.csv", header=TRUE, sep=",")
+attach(data)
+```
+
+```{r, include=TRUE,echo=FALSE,results='hide',message=FALSE}
+data = subset(data,TK_CARRIER_CHANGE==0)
+data = subset(data,MARKET_FARE>=25 & MARKET_FARE<=2500)
+data = data %>% group_by(ORIGIN_AIRPORT_ID,DEST_AIRPORT_ID) %>% 
+  mutate(route_passengers=sum(PASSENGERS))
+data = subset(data,route_passengers>1800)
+```
+
+```{r, include=TRUE,echo=FALSE,results='hide',message=FALSE}
+carrier_data = data %>% group_by(ORIGIN_AIRPORT_ID,DEST_AIRPORT_ID,TICKET_CARRIER) %>% 
+  summarise(mean_price=mean(MARKET_FARE),
+            passenger_count=sum(PASSENGERS),
+            mean_distance=mean(MARKET_DISTANCE))
+attach(carrier_data)
+
+HHI = carrier_data %>% group_by(ORIGIN_AIRPORT_ID,DEST_AIRPORT_ID) %>%
+  summarise(HHI=(sum((passenger_count/sum(passenger_count))^2)))
+
+market_data = data %>% group_by(ORIGIN_AIRPORT_ID,DEST_AIRPORT_ID) %>% 
+  summarise(Mean_Price=mean(MARKET_FARE),
+            Mean_Distance=mean(MARKET_DISTANCE),
+            Firms=n_distinct(TICKET_CARRIER))
+
+market_data=left_join(market_data,HHI,
+  by=c("ORIGIN_AIRPORT_ID"="ORIGIN_AIRPORT_ID","DEST_AIRPORT_ID"="DEST_AIRPORT_ID"))
+
+get(load("~/populations.R")) 
+market_data=left_join(market_data,populations,
+  by=c("ORIGIN_AIRPORT_ID"="ORIGIN_AIRPORT_ID","DEST_AIRPORT_ID"="DEST_AIRPORT_ID"))
+market_data = market_data %>% 
+  mutate(market_size=sqrt(population_origin*population_dest))
+```
+
+```{r,include=TRUE,echo=TRUE}
+vois = c("mean_price","passenger_count","mean_distance")
+kable(summary(carrier_data[vois]),format="markdown")
+```
+Above are summary statistics for the market-carrier-level data. All of the data looks fairly straightforward except for the passenger count data, where the median is about one seventh of the mean. This indicates that most passengers fly on a few routes, and there are many routes with smaller amounts of passengers.
+
+```{r,include=TRUE,echo=TRUE}
+VOIS=c("Mean_Price","Mean_Distance","Firms","HHI","market_size")
+kable(summary(market_data[VOIS]),format="markdown")
+```
+Above are summary statistics for the market-level data. There is nothing too alarming about this data except for  some missing values.
+
+\newpage
+```{r,include=TRUE,echo=TRUE}
+ggplot(market_data, aes(x=HHI, y=Mean_Price)) + 
+  geom_point() + 
+  geom_smooth(method="lm",se=FALSE) +
+  ggtitle("Mean Price vs. HHI")
+```
+The plot above shows the relationship between mean prices and the HHI in the data. Notice that as HHI increases, prices start to decrease. This could be due to a variety of reasons, including endogeneity, niche markets, or competitive pricing.
+
+\newpage
+```{r,include=TRUE,echo=TRUE}
+ggplot(market_data) + 
+  geom_histogram(aes(x=Mean_Price,y=..density..), position="identity",color="white") + 
+  geom_density(aes(x=Mean_Price,y=..density..),color="red") +
+  ggtitle("Density of Mean Prices")
+```
+The plot above shows the density of mean prices in the market-level data. Notice that the density looks skewed and has a fat tail containing a bunch of high-priced tickets.
+
+\newpage
+```{r,include=TRUE,echo=TRUE}
+ggplot(market_data) + 
+  geom_histogram(aes(x=HHI,y=..density..), position="identity",color="white") + 
+  geom_density(aes(x=HHI,y=..density..),color="red") +
+  ggtitle("Density of HHI")
+```
+The plot above has a histogram of HHI values for the market level data and a geometric density line. Notice that the density increases until about 0.5, decreases until about 0.8, and then increases again. Once again, this could be due to niche markets not being able to support multiple firms or some sort of competitive pricing.
